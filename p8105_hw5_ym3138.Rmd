@@ -1,0 +1,85 @@
+---
+title: "HW5"
+author: "Yuwei Ma"
+output: github_document
+
+---
+## Problem 1
+
+```{r echo = TRUE, message = FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(broom)
+
+knitr::opts_chunk$set(
+  fig.width = 6,
+  fig.asp = .6,
+  out.width = "90%"
+)
+```
+
+Build function
+```{r}
+# Function to test whether a group has at least one shared birthday
+
+birthday_dup <- function(n) {
+birthdays <- sample(1:365, n, replace = TRUE)
+any(duplicated(birthdays))
+}
+
+```
+
+Simulation
+```{r}
+set.seed(123)  # ensures reproducibility
+
+group_sizes <- 2:50
+num_runs <- 10000
+
+prob_shared <- numeric(length(group_sizes))
+
+for (i in seq_along(group_sizes)) {
+n <- group_sizes[i]
+results <- replicate(num_runs, birthday_dup(n))
+prob_shared[i] <- mean(results)
+}
+
+prob_shared
+
+```
+
+Plot
+```{r}
+plot(group_sizes, prob_shared, type = "l", lwd = 2,
+xlab = "Group Size (n)",
+ylab = "Probability of Shared Birthday",
+main = "Birthday Problem Simulation",
+cex.lab = 1.3, cex.axis = 1.2, cex.main = 1.4)
+
+grid()
+
+```
+
+The simulation shows:
+
+ * The probability rises slowly for small groups, but increases rapidly after around 20 people.
+ * At 23 people, the probability of a shared birthday is close to 50%.
+ * By the time the group reaches 50 people, the probability is above 90%.
+
+This result is counterintuitive because we expect that a much larger group is needed for such a high probability. The paradox arises because we compare all possible pairs within the group, and the number of pairs grows quadratically with group size.
+
+
+## Problem 2
+```{r}
+simulate_test <- function(mu, sigma = 5, n = 30) {
+x <- rnorm(n, mean = mu, sd = sigma)
+result <- tidy(t.test(x, mu = 0))
+
+tibble(
+estimate = result$estimate,
+pvalue = result$p.value
+)
+}
+```
+
