@@ -83,3 +83,170 @@ pvalue = result$p.value
 }
 ```
 
+simulation
+```{r}
+set.seed(123)
+
+mu_values <- 0:6
+num_sims <- 5000
+
+results <- lapply(mu_values, function(mu) {
+sims <- replicate(num_sims, simulate_test(mu), simplify = FALSE)
+df <- bind_rows(sims)
+df$mu_true <- mu
+df
+})
+
+results <- bind_rows(results)
+
+```
+
+plot1: Power vs True μ
+```{r}
+power_df <- results %>%
+group_by(mu_true) %>%
+summarize(power = mean(pvalue < 0.05))
+
+ggplot(power_df, aes(x = mu_true, y = power)) +
+geom_line(linewidth = 1.2) +
+geom_point(size = 3) +
+labs(title = "Power vs True Mean",
+x = "True Mean (μ)",
+y = "Power (Pr(reject H0))") +
+theme_minimal(base_size = 16)
+
+```
+Power increases as the true mean μ gets farther from 0.
+When μ=0, the test rarely rejects (close to 5%, the nominal level).
+As μ increases to 6, power quickly approaches 1.
+This occurs because larger effect sizes produce sample means more easily distinguished from 0.
+
+plot2 
+```{r}
+estimate_df <- results %>%
+group_by(mu_true) %>%
+summarize(
+avg_estimate_all = mean(estimate),
+avg_estimate_rej = mean(estimate[pvalue < 0.05])
+)
+estimate_df
+
+```
+
+```{r}
+ggplot(estimate_df, aes(x = mu_true)) +
+geom_line(aes(y = avg_estimate_all), linewidth = 1.2) +
+geom_point(aes(y = avg_estimate_all), size = 3) +
+geom_line(aes(y = avg_estimate_rej), color = "red", linewidth = 1.2) +
+geom_point(aes(y = avg_estimate_rej), color = "red", size = 3) +
+labs(title = "Average Estimate vs True Mean",
+x = "True Mean (μ)",
+y = "Average Estimate",
+subtitle = "Black = all samples; Red = samples where null was rejected") +
+theme_minimal(base_size = 16)
+
+```
+
+
+ * The black line (all samples) lies almost exactly on the 45° line →
+the estimator is unbiased, as expected for the sample mean.
+ * The red line (only samples that rejected H0) is systematically above the true μ for small effect sizes.
+
+This happens because:
+
+ * When the true μ is small (e.g., 0–2), the null is rejected only when the sample mean happens to be unusually large.
+ * Conditioning on rejection introduces selection bias.
+ * Therefore, the average estimate among significant results overestimates the true mean.
+This is known as the winner’s curse or significance filter bias.
+
+## Problem 3
+
+```{r}
+homicide_df = read_csv("data/homicide-data.csv") |> 
+  mutate(
+    city_state = paste(city, state, sep = ", "),
+    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest"))
+```
+The dataset includes homicide-level information in 50 major U.S. cities.
+It contains:
+
+ * Victim information: race, age, sex
+ * Location: city, state, latitude/longitude
+ * Date of report
+ * Case disposition
+ * Unique case ID
+Each row corresponds to one homicide case.
+
+```{r}
+city_summary <- homicide_df |> 
+group_by(city_state) |> 
+summarize(
+total = n(),
+unsolved = sum(unsolved)
+)
+
+city_summary
+
+```
+
+Prop test
+```{r}
+
+baltimore_data <- city_summary |> 
+filter(city_state == "Baltimore, MD")
+
+baltimore_test <- prop.test(
+x = baltimore_data$unsolved,
+n = baltimore_data$total
+)
+
+baltimore_tidy <- tidy(baltimore_test)
+baltimore_tidy
+
+```
+
+```{r}
+baltimore_estimate <- baltimore_tidy |> 
+select(estimate, conf.low, conf.high)
+
+baltimore_estimate
+
+```
+
+Prop test for every city 
+```{r}
+city_prop_results <- city_summary %>%
+mutate(
+test = map2(unsolved, total, ~ prop.test(.x, .y)),
+tidy = map(test, tidy)
+) |> 
+unnest(tidy) |> 
+select(city_state, estimate, conf.low, conf.high)
+
+city_prop_results
+
+```
+
+Plot
+```{r}
+city_prop_results <- city_prop_results |> 
+arrange(estimate) |> 
+mutate(city_state = factor(city_state, levels = city_state))
+
+ggplot(city_prop_results,
+aes(x = estimate, y = city_state)) +
+geom_point(size = 2) +
+geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
+labs(
+title = "Estimated Proportion of Unsolved Homicides by City",
+x = "Proportion Unsolved (with 95% CI)",
+y = "City"
+) +
+theme_minimal(base_size = 14)
+
+
+```
+Cities vary widely in their proportion of homicides that remain unsolved.
+The prop.test confidence intervals reveal substantial uncertainty for cities with fewer homicides, while larger cities have narrower intervals.
+Sorting by estimate shows clearly which cities have higher or lower clearance rates.
+ 
