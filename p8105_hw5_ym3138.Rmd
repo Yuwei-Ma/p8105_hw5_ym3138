@@ -4,14 +4,17 @@ author: "Yuwei Ma"
 output: github_document
 
 ---
-## Problem 1
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE)
+```
 
 ```{r echo = TRUE, message = FALSE}
 library(tidyverse)
 library(dplyr)
 library(ggplot2)
 library(broom)
-
+library(knitr)
 knitr::opts_chunk$set(
   fig.width = 6,
   fig.asp = .6,
@@ -19,46 +22,58 @@ knitr::opts_chunk$set(
 )
 ```
 
+## Problem 1
+
 Build function
-```{r}
-# Function to test whether a group has at least one shared birthday
+```{r create-function}
+has_duplicate_birthday <- function(n) {
+  birthdays <- sample(1:365, size = n, replace = TRUE)
+  has_duplicate <- length(unique(birthdays)) < n
 
-birthday_dup <- function(n) {
-birthdays <- sample(1:365, n, replace = TRUE)
-any(duplicated(birthdays))
+  return(has_duplicate)
 }
-
 ```
 
 Simulation
 ```{r}
-set.seed(123)  # ensures reproducibility
+set.seed(123)
 
+n_sims <- 10000
 group_sizes <- 2:50
-num_runs <- 10000
 
-prob_shared <- numeric(length(group_sizes))
+simulation_df <- tibble(group_size = group_sizes)
 
-for (i in seq_along(group_sizes)) {
-n <- group_sizes[i]
-results <- replicate(num_runs, birthday_dup(n))
-prob_shared[i] <- mean(results)
-}
+prob_data <- simulation_df |> 
+  rowwise() |> 
+  mutate(
+    probability = mean(replicate(n_sims, has_duplicate_birthday(group_size)))
+  ) |> 
+  ungroup() # Always ungroup after rowwise()
 
-prob_shared
-
+print(head(prob_data))
 ```
+
 
 Plot
 ```{r}
-plot(group_sizes, prob_shared, type = "l", lwd = 2,
-xlab = "Group Size (n)",
-ylab = "Probability of Shared Birthday",
-main = "Birthday Problem Simulation",
-cex.lab = 1.3, cex.axis = 1.2, cex.main = 1.4)
-
-grid()
-
+prob_data |> 
+  ggplot(aes(x = group_size, y = probability)) +
+  geom_line(size = 1) +
+  geom_point(alpha = 0.6) +
+labs(
+    title = "The Birthday Problem: A Monte Carlo Simulation",
+    subtitle = paste("Based on", scales::comma(n_sims), "simulations per group size"),
+    x = "Group Size (n)",
+    y = "Probability of at Least One Shared Birthday"
+  ) +
+  # Format the y-axis as percentages (0%, 25%, etc.)
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  
+  # Set the x-axis to show breaks every 5 people
+  scale_x_continuous(breaks = seq(0, 50, 5)) +
+  # Use a clean, minimal theme
+  theme_minimal(base_size = 14) +
+  theme(plot.title = element_text(face = "bold"))
 ```
 
 The simulation shows:
@@ -67,186 +82,222 @@ The simulation shows:
  * At 23 people, the probability of a shared birthday is close to 50%.
  * By the time the group reaches 50 people, the probability is above 90%.
 
-This result is counterintuitive because we expect that a much larger group is needed for such a high probability. The paradox arises because we compare all possible pairs within the group, and the number of pairs grows quadratically with group size.
-
 
 ## Problem 2
-```{r}
-simulate_test <- function(mu, sigma = 5, n = 30) {
-x <- rnorm(n, mean = mu, sd = sigma)
-result <- tidy(t.test(x, mu = 0))
 
-tibble(
-estimate = result$estimate,
-pvalue = result$p.value
+simulation
+```{r}
+n <- 30
+sigma <- 5
+mu_values <- 0:6
+n_sims <- 5000
+alpha <- 0.05
+
+# Create a grid of all simulation runs
+sim_grid <- crossing(
+  mu = mu_values,
+  sim_num = 1:n_sims
 )
-}
 ```
 
 simulation
 ```{r}
-set.seed(123)
-
-mu_values <- 0:6
-num_sims <- 5000
-
-results <- lapply(mu_values, function(mu) {
-sims <- replicate(num_sims, simulate_test(mu), simplify = FALSE)
-df <- bind_rows(sims)
-df$mu_true <- mu
-df
-})
-
-results <- bind_rows(results)
+all_results <- sim_grid |> 
+  mutate(
+    test_result = map(mu, ~ tidy(t.test(rnorm(n = n, mean = .x, sd = sigma), mu = 0)))
+  ) |> 
+  unnest(test_result)
 
 ```
 
-plot1: Power vs True μ
+
 ```{r}
-power_df <- results %>%
-group_by(mu_true) %>%
-summarize(power = mean(pvalue < 0.05))
+# Calculate power for each true value of mu
+power_data <- all_results |> 
+  group_by(mu) |> 
+  summarize(
+    power = mean(p.value < alpha),
+    .groups = "drop"
+  )
 
-ggplot(power_df, aes(x = mu_true, y = power)) +
-geom_line(linewidth = 1.2) +
-geom_point(size = 3) +
-labs(title = "Power vs True Mean",
-x = "True Mean (μ)",
-y = "Power (Pr(reject H0))") +
-theme_minimal(base_size = 16)
-
-```
-Power increases as the true mean μ gets farther from 0.
-When μ=0, the test rarely rejects (close to 5%, the nominal level).
-As μ increases to 6, power quickly approaches 1.
-This occurs because larger effect sizes produce sample means more easily distinguished from 0.
-
-plot2 
-```{r}
-estimate_df <- results %>%
-group_by(mu_true) %>%
-summarize(
-avg_estimate_all = mean(estimate),
-avg_estimate_rej = mean(estimate[pvalue < 0.05])
+# Power table
+knitr::kable(
+  power_data,
+  digits = 3,
+  col.names = c("True Mu (Effect Size)", "Power"),
+  caption = "Power vs. True Effect Size"
 )
-estimate_df
+
+# Power Plot
+ggplot(power_data, aes(x = mu, y = power)) +
+  geom_line(color = "blue", size = 1) +
+  geom_point(color = "blue", size = 2) +
+  scale_y_continuous(limits = c(0, 1), labels = scales::percent_format()) +
+  labs(
+    title = "Power Increases with Effect Size",
+    x = "True Value of Mu (Effect Size)",
+    y = "Power (Proportion of Rejections)"
+  ) +
+  theme_minimal(base_size = 14)
 
 ```
 
+As shown in the plot and table, there is a strong, positive association between effect size and power.
+
+When the true $\mu = 0$ (i.e., the null hypothesis is true), the proportion of rejections is approximately 0.05. This is our significance level, $\alpha$, and represents the Type I error rate.
+
+As the true $\mu$ increases from 1 to 6, the power (the probability of correctly rejecting the false null hypothesis) increases monotonically from about 18% to nearly 100%.
+
+This demonstrates that it is much easier to detect a large effect (e.g., $\mu = 6$) than a small effect (e.g., $\mu = 1$) with the same sample size and variance.
+
+
+Plot 2
 ```{r}
-ggplot(estimate_df, aes(x = mu_true)) +
-geom_line(aes(y = avg_estimate_all), linewidth = 1.2) +
-geom_point(aes(y = avg_estimate_all), size = 3) +
-geom_line(aes(y = avg_estimate_rej), color = "red", linewidth = 1.2) +
-geom_point(aes(y = avg_estimate_rej), color = "red", size = 3) +
-labs(title = "Average Estimate vs True Mean",
-x = "True Mean (μ)",
-y = "Average Estimate",
-subtitle = "Black = all samples; Red = samples where null was rejected") +
-theme_minimal(base_size = 16)
+estimate_data <- all_results |> 
+  group_by(mu) |> 
+  summarize(
+    # Average estimate across ALL samples
+    avg_estimate_all = mean(estimate),
+    
+    # Average estimate ONLY in samples where H0 was rejected
+    # We filter for p.value < alpha before taking the mean
+    avg_estimate_rejected = mean(estimate[p.value < alpha]),
+    .groups = "drop"
+  )
+
+# Pivot to long format for easy plotting with ggplot
+estimate_data_long <- estimate_data |> 
+  pivot_longer(
+    cols = c(avg_estimate_all, avg_estimate_rejected),
+    names_to = "sample_group",
+    values_to = "average_estimate"
+  )
+
+
+ggplot(estimate_data_long, aes(x = mu, y = average_estimate, color = sample_group)) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  # Add a y=x line to show the "perfect" estimate
+  geom_abline(
+    slope = 1, intercept = 0,
+    linetype = "dashed", color = "black"
+  ) +
+  scale_color_manual(
+    name = "Sample Group",
+    values = c("avg_estimate_all" = "steelblue", "avg_estimate_rejected" = "firebrick"),
+    labels = c("All Samples", "Null Rejected Samples")
+  ) +
+  labs(
+    title = "Average Estimate vs. True Mu",
+    subtitle = "Comparing all samples to 'significant' samples",
+    x = "True Value of Mu",
+    y = "Average Estimated Mu"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
 
 ```
 
+The sample average of $\mu$ across tests for which the null is rejected is not approximately equal to the true value of $\mu$.
 
- * The black line (all samples) lies almost exactly on the 45° line →
-the estimator is unbiased, as expected for the sample mean.
- * The red line (only samples that rejected H0) is systematically above the true μ for small effect sizes.
+Unbiased Estimator (All Samples): The plot shows that the average estimate across all samples (the blue line) falls almost perfectly on the dashed y=x line. This confirms that the sample mean (estimate) is an unbiased estimator of the true $\mu$.
 
-This happens because:
+Biased Estimator (Rejected Samples): The average estimate from only the 'significant' samples (the red line) is consistently higher than the true value of $\mu$.
 
- * When the true μ is small (e.g., 0–2), the null is rejected only when the sample mean happens to be unusually large.
- * Conditioning on rejection introduces selection bias.
- * Therefore, the average estimate among significant results overestimates the true mean.
-This is known as the winner’s curse or significance filter bias.
+This is because of selection bias. We are filtering our results based on a statistical test. When the true effect size is small (e.g., $\mu = 1$ or $\mu = 2$), power is low. The only way to get a "significant" result in this low-power setting is if the random sample, by chance, produces a sample mean that is substantially larger than the true mean. When we average only these "winning" samples that were lucky enough to pass the significance threshold, the resulting average is artificially inflated.
+
+As power gets higher (e.g., $\mu = 5$ or $\mu = 6$), almost all samples lead to rejection, so this selection bias diminishes, and the red line converges with the blue line and the true value.
 
 ## Problem 3
 
 ```{r}
-homicide_df = read_csv("data/homicide-data.csv") |> 
-  mutate(
-    city_state = paste(city, state, sep = ", "),
-    unsolved = disposition %in% c("Closed without arrest", "Open/No arrest"))
+homicide_df = read_csv("data/homicide-data.csv")
 ```
-The dataset includes homicide-level information in 50 major U.S. cities.
-It contains:
 
- * Victim information: race, age, sex
- * Location: city, state, latitude/longitude
- * Date of report
- * Case disposition
- * Unique case ID
-Each row corresponds to one homicide case.
+ * The dataset includes homicide-level information in 50 major U.S. cities.
+ * It contains `r nrow(homicide_df)` observations and `r ncol(homicide_df)` variables.
+ * It includes:
+    * Victim information: race, age, sex
+    * Location: city, state, latitude/longitude
+    * Date of report
+    * Case disposition
+    * Unique case ID
+ * Each row corresponds to one homicide case.
 
+
+# Summarize the data
 ```{r}
+# Create city_state and summarize
 city_summary <- homicide_df |> 
-group_by(city_state) |> 
-summarize(
-total = n(),
-unsolved = sum(unsolved)
-)
+  mutate(city_state = str_c(city, ", ", state)) |> 
+  group_by(city_state) |> 
+  summarize(
+    total_homicides = n(),
+    unsolved_homicides = sum(disposition %in% c("Closed without arrest", "Open/No arrest"))
+  )
 
-city_summary
-
+knitr::kable(city_summary)
 ```
 
-Prop test
+# Baltimore
 ```{r}
-
+# Filter for Baltimore data
 baltimore_data <- city_summary |> 
-filter(city_state == "Baltimore, MD")
+  filter(city_state == "Baltimore, MD")
 
-baltimore_test <- prop.test(
-x = baltimore_data$unsolved,
-n = baltimore_data$total
+# Run prop.test for Baltimore
+balt_prop <- prop.test(
+  x = baltimore_data$unsolved_homicides,
+  n = baltimore_data$total_homicides
 )
 
-baltimore_tidy <- tidy(baltimore_test)
-baltimore_tidy
+# Tidy the result
+balt_tidy = balt_prop |> 
+  broom::tidy()
 
+balt_table = balt_tidy |> 
+  select(estimate, p.value, conf.low, conf.high) 
+
+knitr::kable(balt_table)
 ```
+
+The estimated proportion is 0.6455607; the 95% confidence interval is (0.6275625, 0.6631599).
+
+# All cities
+```{r}
+# Run prop.test for all cities and tidy the results
+city_props <- city_summary |> 
+  mutate(
+    prop_test = map2(unsolved_homicides, total_homicides, ~ prop.test(x = .x, n = .y)),
+    tidy_test = map(prop_test, broom::tidy)
+  ) |> 
+  unnest(tidy_test) |> 
+  select(city_state, total_homicides, unsolved_homicides, estimate, conf.low, conf.high)
+
+# View the results
+knitr::kable(head(city_props))
+```
+
 
 ```{r}
-baltimore_estimate <- baltimore_tidy |> 
-select(estimate, conf.low, conf.high)
-
-baltimore_estimate
-
+# Create the plot
+city_props |> 
+  ggplot(aes(x = fct_reorder(city_state, estimate), y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high)) +
+  coord_flip() +
+  labs(
+    title = "Proportion of Unsolved Homicides by U.S. City",
+    x = "City",
+    y = "Estimated Proportion of Unsolved Homicides (with 95% CI)"
+  ) +
+  theme_minimal()
 ```
 
-Prop test for every city 
-```{r}
-city_prop_results <- city_summary %>%
-mutate(
-test = map2(unsolved, total, ~ prop.test(.x, .y)),
-tidy = map(test, tidy)
-) |> 
-unnest(tidy) |> 
-select(city_state, estimate, conf.low, conf.high)
-
-city_prop_results
-
-```
-
-Plot
-```{r}
-city_prop_results <- city_prop_results |> 
-arrange(estimate) |> 
-mutate(city_state = factor(city_state, levels = city_state))
-
-ggplot(city_prop_results,
-aes(x = estimate, y = city_state)) +
-geom_point(size = 2) +
-geom_errorbar(aes(xmin = conf.low, xmax = conf.high), width = 0.2) +
-labs(
-title = "Estimated Proportion of Unsolved Homicides by City",
-x = "Proportion Unsolved (with 95% CI)",
-y = "City"
-) +
-theme_minimal(base_size = 14)
 
 
-```
-Cities vary widely in their proportion of homicides that remain unsolved.
-The prop.test confidence intervals reveal substantial uncertainty for cities with fewer homicides, while larger cities have narrower intervals.
-Sorting by estimate shows clearly which cities have higher or lower clearance rates.
- 
+
+
+
+
+
